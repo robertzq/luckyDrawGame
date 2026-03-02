@@ -31,29 +31,38 @@ func _get_random_color() -> Color:
 	return Color(hue, 0.8, 1.0)
 
 func blow():
-	"""根据小球所在位置，施加对流风力"""
+	"""抽奖机喷气逻辑：中心喷泉 + 边缘向心回流 + 水平漩涡"""
 	if not is_selected:
 		sleeping = false
 		
-		if linear_velocity.length() > 8.0:
-			linear_velocity = linear_velocity.normalized() * 6.0
+		# 稍微放宽速度限制，让搅拌更激烈
+		if linear_velocity.length() > 10.0:
+			linear_velocity = linear_velocity.normalized() * 8.0
 			
 		var force = Vector3.ZERO
-		var force_magnitude = randf_range(8.0, 12.0) # 基础风力大小
 		
-		if position.x > 0:
-			# 如果球在右半边：向左下 45度 吹气
-			# 向量 (-1, -1, 0) 标准化后就是精准的左下45度
-			var dir = Vector3(-1.0, -1.0, 0.0).normalized()
-			force = dir * force_magnitude
+		# 计算小球到箱子中心 (X=0, Z=0) 的水平距离
+		var horiz_pos = Vector2(position.x, position.z)
+		var dist_to_center = horiz_pos.length()
+		
+		if dist_to_center < 0.6:
+			# 1. 处于中心区域：强大的向上喷发
+			force = Vector3(
+				randf_range(-3.0, 3.0),
+				randf_range(12.0, 16.0), # 强力向上
+				randf_range(-3.0, 3.0)
+			)
 		else:
-			# 如果球在左半边：向右上 15度 吹气
-			# tan(15°) ≈ 0.268，所以向量 (1, 0.268, 0) 就是右上15度
-			var dir = Vector3(1.0, 0.268, 0.0).normalized()
-			force = dir * force_magnitude
+			# 2. 处于四周边缘：强制往中心推（绝对防卡墙）
+			var to_center = Vector3(-position.x, 0, -position.z).normalized()
+			force = to_center * randf_range(8.0, 12.0)
+			# 给边缘的球加一点点上下的随机扰流
+			force.y = randf_range(-2.0, 4.0)
 			
-		# 给 Z 轴（前后方向）加一点点随机扰流，防止小球全部卡在同一个平面上
-		force.z += randf_range(-3.0, 3.0)
+		# 3. 添加切线漩涡力（让整个球堆顺时针旋转）
+		var to_outward = Vector3(position.x, 0, position.z).normalized()
+		var tangent = Vector3(0, 1, 0).cross(to_outward) # 向量叉乘得到圆周切线
+		force += tangent * randf_range(4.0, 7.0)
 		
 		apply_central_impulse(force)
 
@@ -74,7 +83,8 @@ func _integrate_forces(state: PhysicsDirectBodyState3D):
 	
 	if clamped:
 		state.transform.origin = pos
-		state.linear_velocity *= 0.5 
+		# 优化：碰到极限安全墙时，只削弱 20% 动能，防止瞬间失去活力
+		state.linear_velocity *= 0.8 
 
 func highlight_and_float(target_pos: Vector3):
 	is_selected = true
